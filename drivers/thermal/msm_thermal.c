@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -156,7 +156,7 @@ enum ocr_request {
 
 #define VDD_RES_RO_ATTRIB(_rail, ko_attr, j, _name) \
 	ko_attr.attr.name = __stringify(_name); \
-	ko_attr.attr.mode = 444; \
+	ko_attr.attr.mode = 0444; \
 	ko_attr.show = vdd_rstr_reg_##_name##_show; \
 	ko_attr.store = NULL; \
 	sysfs_attr_init(&ko_attr.attr); \
@@ -164,7 +164,7 @@ enum ocr_request {
 
 #define VDD_RES_RW_ATTRIB(_rail, ko_attr, j, _name) \
 	ko_attr.attr.name = __stringify(_name); \
-	ko_attr.attr.mode = 644; \
+	ko_attr.attr.mode = 0644; \
 	ko_attr.show = vdd_rstr_reg_##_name##_show; \
 	ko_attr.store = vdd_rstr_reg_##_name##_store; \
 	sysfs_attr_init(&ko_attr.attr); \
@@ -181,7 +181,7 @@ enum ocr_request {
 
 #define OCR_RW_ATTRIB(_rail, ko_attr, j, _name) \
 	ko_attr.attr.name = __stringify(_name); \
-	ko_attr.attr.mode = 644; \
+	ko_attr.attr.mode = 0644; \
 	ko_attr.show = ocr_reg_##_name##_show; \
 	ko_attr.store = ocr_reg_##_name##_store; \
 	sysfs_attr_init(&ko_attr.attr); \
@@ -189,7 +189,7 @@ enum ocr_request {
 
 #define PSM_RW_ATTRIB(_rail, ko_attr, j, _name) \
 	ko_attr.attr.name = __stringify(_name); \
-	ko_attr.attr.mode = 644; \
+	ko_attr.attr.mode = 0644; \
 	ko_attr.show = psm_reg_##_name##_show; \
 	ko_attr.store = psm_reg_##_name##_store; \
 	sysfs_attr_init(&ko_attr.attr); \
@@ -425,7 +425,7 @@ done_vdd_rstr_en:
 
 static struct vdd_rstr_enable vdd_rstr_en = {
 	.ko_attr.attr.name = __stringify(enabled),
-	.ko_attr.attr.mode = 644,
+	.ko_attr.attr.mode = 0644,
 	.ko_attr.show = vdd_rstr_en_show,
 	.ko_attr.store = vdd_rstr_en_store,
 	.enabled = 1,
@@ -1772,6 +1772,18 @@ int __devinit msm_thermal_init(struct msm_thermal_data *pdata)
 	int ret = 0;
 	uint32_t cpu;
 
+	for_each_possible_cpu(cpu) {
+		cpus[cpu].cpu = cpu;
+		cpus[cpu].offline = 0;
+		cpus[cpu].user_offline = 0;
+		cpus[cpu].hotplug_thresh_clear = false;
+		cpus[cpu].max_freq = false;
+		cpus[cpu].user_max_freq = UINT_MAX;
+		cpus[cpu].user_min_freq = 0;
+		cpus[cpu].limited_max_freq = UINT_MAX;
+		cpus[cpu].limited_min_freq = 0;
+		cpus[cpu].freq_thresh_clear = false;
+	}
 	BUG_ON(!pdata);
 	tsens_get_max_sensor_num(&max_tsens_num);
 	memcpy(&msm_thermal_info, pdata, sizeof(struct msm_thermal_data));
@@ -1782,10 +1794,6 @@ int __devinit msm_thermal_init(struct msm_thermal_data *pdata)
 		return -EINVAL;
 
 	enabled = 1;
-	for_each_possible_cpu(cpu) {
-		cpus[cpu].limited_max_freq = UINT_MAX;
-		cpus[cpu].limited_min_freq = 0;
-	}
 	ret = cpufreq_register_notifier(&msm_thermal_cpufreq_notifier,
 			CPUFREQ_POLICY_NOTIFIER);
 	if (ret)
@@ -2429,17 +2437,13 @@ static int probe_cc(struct device_node *node, struct msm_thermal_data *data,
 
 	key = "qcom,cpu-sensors";
 	cpu_cnt = of_property_count_strings(node, key);
-	if (cpu_cnt != num_possible_cpus()) {
-		pr_err("%s: Wrong number of cpu\n", KBUILD_MODNAME);
+	if (cpu_cnt < num_possible_cpus()) {
+		pr_err("%s: Wrong number of cpu sensors\n", KBUILD_MODNAME);
 		ret = -EINVAL;
 		goto hotplug_node_fail;
 	}
 
 	for_each_possible_cpu(cpu) {
-		cpus[cpu].cpu = cpu;
-		cpus[cpu].offline = 0;
-		cpus[cpu].user_offline = 0;
-		cpus[cpu].hotplug_thresh_clear = false;
 		ret = of_property_read_string_index(node, key, cpu,
 				&cpus[cpu].sensor_type);
 		if (ret)
@@ -2473,7 +2477,6 @@ static int probe_freq_mitigation(struct device_node *node,
 {
 	char *key = NULL;
 	int ret = 0;
-	uint32_t cpu;
 
 	key = "qcom,freq-mitigation-temp";
 	ret = of_property_read_u32(node, key, &data->freq_mitig_temp_degc);
@@ -2497,14 +2500,6 @@ static int probe_freq_mitigation(struct device_node *node,
 		goto PROBE_FREQ_EXIT;
 
 	freq_mitigation_enabled = 1;
-	for_each_possible_cpu(cpu) {
-		cpus[cpu].max_freq = false;
-		cpus[cpu].user_max_freq = UINT_MAX;
-		cpus[cpu].user_min_freq = 0;
-		cpus[cpu].limited_max_freq = UINT_MAX;
-		cpus[cpu].limited_min_freq = 0;
-		cpus[cpu].freq_thresh_clear = false;
-	}
 
 PROBE_FREQ_EXIT:
 	if (ret) {

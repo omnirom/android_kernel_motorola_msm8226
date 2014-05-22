@@ -408,6 +408,14 @@ static void disable_bms_irq(struct bms_irq *irq)
 	}
 }
 
+static void disable_bms_irq_nosync(struct bms_irq *irq)
+{
+	if (!__test_and_set_bit(0, &irq->disabled)) {
+		disable_irq_nosync(irq->irq);
+		pr_debug("disabled irq %d\n", irq->irq);
+	}
+}
+
 #define HOLD_OREG_DATA		BIT(0)
 static int lock_output_data(struct qpnp_bms_chip *chip)
 {
@@ -2314,6 +2322,8 @@ static void configure_soc_wakeup(struct qpnp_bms_chip *chip,
 	qpnp_write_wrapper(chip, (u8 *)&ocv_raw,
 			chip->base + BMS1_OCV_THR0, 2);
 
+	enable_bms_irq(&chip->ocv_thr_irq);
+	enable_bms_irq(&chip->sw_cc_thr_irq);
 	pr_debug("current sw_cc_raw = 0x%llx, current ocv = 0x%hx\n",
 			current_shdw_cc_raw, (uint16_t)current_ocv_raw);
 	pr_debug("target_cc_uah = %lld, raw64 = 0x%llx, raw 36 = 0x%llx, ocv_raw = 0x%hx\n",
@@ -2444,9 +2454,13 @@ static int calculate_state_of_charge(struct qpnp_bms_chip *chip,
 	 * If the battery is full, configure the cc threshold so the system
 	 * wakes up after SoC changes
 	 */
-	if (is_battery_full(chip))
+	if (is_battery_full(chip)) {
 		configure_soc_wakeup(chip, &params,
 				batt_temp, bound_soc(new_calculated_soc - 1));
+	} else {
+		disable_bms_irq(&chip->ocv_thr_irq);
+		disable_bms_irq(&chip->sw_cc_thr_irq);
+	}
 done_calculating:
 	mutex_lock(&chip->last_soc_mutex);
 	previous_soc = chip->calculated_soc;
@@ -2532,7 +2546,7 @@ static int recalculate_raw_soc(struct qpnp_bms_chip *chip)
 		soc = calculate_soc_from_voltage(chip);
 	} else {
 		if (!chip->batfet_closed)
-			qpnp_iadc_calibrate_for_trim(chip->iadc_dev, true);
+			qpnp_iadc_calibrate_for_trim(chip->iadc_dev, false);
 		rc = qpnp_vadc_read(chip->vadc_dev, LR_MUX1_BATT_THERM,
 								&result);
 		if (rc) {
@@ -2584,7 +2598,7 @@ static int recalculate_soc(struct qpnp_bms_chip *chip)
 		soc = calculate_soc_from_voltage(chip);
 	} else {
 		if (!chip->batfet_closed)
-			qpnp_iadc_calibrate_for_trim(chip->iadc_dev, true);
+			qpnp_iadc_calibrate_for_trim(chip->iadc_dev, false);
 		rc = qpnp_vadc_read(chip->vadc_dev, LR_MUX1_BATT_THERM,
 								&result);
 		if (rc) {
@@ -3288,8 +3302,6 @@ static void battery_status_check(struct qpnp_bms_chip *chip)
 
 		if (status == POWER_SUPPLY_STATUS_FULL) {
 			pr_debug("battery full\n");
-			enable_bms_irq(&chip->ocv_thr_irq);
-			enable_bms_irq(&chip->sw_cc_thr_irq);
 			recalculate_soc(chip);
 		} else if (chip->battery_status
 				== POWER_SUPPLY_STATUS_FULL) {
@@ -3311,12 +3323,11 @@ static void batfet_status_check(struct qpnp_bms_chip *chip)
 {
 	bool batfet_closed;
 
-	if (chip->iadc_bms_revision2 > CALIB_WRKARND_DIG_MAJOR_MAX)
-		return;
-
 	batfet_closed = is_batfet_closed(chip);
 	if (chip->batfet_closed != batfet_closed) {
 		chip->batfet_closed = batfet_closed;
+		if (chip->iadc_bms_revision2 > CALIB_WRKARND_DIG_MAJOR_MAX)
+			return;
 		if (batfet_closed == false) {
 			/* batfet opened */
 			schedule_work(&chip->batfet_open_work);
@@ -3588,6 +3599,7 @@ static irqreturn_t bms_sw_cc_thr_irq_handler(int irq, void *_chip)
 	struct qpnp_bms_chip *chip = _chip;
 
 	pr_debug("sw_cc_thr irq triggered\n");
+	disable_bms_irq_nosync(&chip->sw_cc_thr_irq);
 	bms_stay_awake(&chip->soc_wake_source);
 	schedule_work(&chip->recalc_work);
 	return IRQ_HANDLED;
@@ -4312,6 +4324,12 @@ static int __devinit qpnp_bms_probe(struct spmi_device *spmi)
 
 	calculate_soc_work(&(chip->calculate_soc_delayed_work.work));
 
+	rc = bms_request_irqs(chip);
+	if (rc) {
+		pr_err("error requesting bms irqs, rc = %d\n", rc);
+		goto error_setup;
+	}
+
 	battery_insertion_check(chip);
 	batfet_status_check(chip);
 	battery_status_check(chip);
@@ -4340,12 +4358,6 @@ static int __devinit qpnp_bms_probe(struct spmi_device *spmi)
 	if (rc) {
 		pr_err("error reading vbat_sns adc channel = %d, rc = %d\n",
 						VBAT_SNS, rc);
-		goto unregister_dc;
-	}
-
-	rc = bms_request_irqs(chip);
-	if (rc) {
-		pr_err("error requesting bms irqs, rc = %d\n", rc);
 		goto unregister_dc;
 	}
 

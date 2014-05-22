@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -192,7 +192,8 @@ struct mdss_mdp_ctl {
 					struct mdss_mdp_vsync_handler *);
 	int (*remove_vsync_handler) (struct mdss_mdp_ctl *,
 					struct mdss_mdp_vsync_handler *);
-	int (*config_fps_fnc) (struct mdss_mdp_ctl *ctl, int new_fps);
+	int (*config_fps_fnc) (struct mdss_mdp_ctl *ctl,
+				struct mdss_mdp_ctl *sctl, int new_fps);
 
 	struct blocking_notifier_head notifier_head;
 	void (*ctx_dump_fnc) (struct mdss_mdp_ctl *ctl);
@@ -232,7 +233,7 @@ struct mdss_mdp_format_params {
 	u8 unpack_count;	/* 0 = 1 component, 1 = 2 component ... */
 	u8 bpp;
 	u8 alpha_enable;	/*  source has alpha */
-
+	u8 tile;
 	u8 bits[MAX_PLANES];
 	u8 element[MAX_PLANES];
 };
@@ -408,6 +409,11 @@ struct mdss_overlay_private {
 	u32 splash_mem_addr;
 	u32 splash_mem_size;
 	u32 sd_enabled;
+
+	struct sw_sync_timeline *vsync_timeline;
+	struct mdss_mdp_vsync_handler vsync_retire_handler;
+	struct work_struct retire_work;
+	int retire_cnt;
 };
 
 struct mdss_mdp_perf_params {
@@ -504,7 +510,7 @@ int mdss_mdp_ctl_start(struct mdss_mdp_ctl *ctl);
 int mdss_mdp_ctl_stop(struct mdss_mdp_ctl *ctl);
 int mdss_mdp_ctl_intf_event(struct mdss_mdp_ctl *ctl, int event, void *arg);
 int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
-		struct mdss_mdp_perf_params *perf, int tune);
+	struct mdss_mdp_perf_params *perf, int tune, struct mdss_mdp_img_rect *roi);
 int mdss_mdp_ctl_notify(struct mdss_mdp_ctl *ctl, int event);
 void mdss_mdp_ctl_notifier_register(struct mdss_mdp_ctl *ctl,
 	struct notifier_block *notifier);
@@ -551,8 +557,10 @@ int mdss_mdp_hist_lut_config(struct mdp_hist_lut_data *config, u32 *copyback);
 int mdss_mdp_dither_config(struct mdp_dither_cfg_data *config, u32 *copyback);
 int mdss_mdp_gamut_config(struct mdp_gamut_cfg_data *config, u32 *copyback);
 
-int mdss_mdp_histogram_start(struct mdp_histogram_start_req *req);
-int mdss_mdp_histogram_stop(u32 block);
+int mdss_mdp_hist_intr_req(struct mdss_intr *intr, u32 bits, bool en);
+int mdss_mdp_hist_intr_setup(struct mdss_intr *intr, int state);
+int mdss_mdp_hist_start(struct mdp_histogram_start_req *req);
+int mdss_mdp_hist_stop(u32 block);
 int mdss_mdp_hist_collect(struct mdp_histogram_data *hist);
 void mdss_mdp_hist_intr_done(u32 isr);
 
@@ -607,6 +615,10 @@ int mdss_mdp_calc_phase_step(u32 src, u32 dst, u32 *out_phase);
 void mdss_mdp_intersect_rect(struct mdss_mdp_img_rect *res_rect,
 	const struct mdss_mdp_img_rect *dst_rect,
 	const struct mdss_mdp_img_rect *sci_rect);
+void mdss_mdp_crop_rect(struct mdss_mdp_img_rect *src_rect,
+	struct mdss_mdp_img_rect *dst_rect,
+	const struct mdss_mdp_img_rect *sci_rect);
+
 
 int mdss_mdp_wb_kickoff(struct msm_fb_data_type *mfd);
 int mdss_mdp_wb_ioctl_handler(struct msm_fb_data_type *mfd, u32 cmd, void *arg);

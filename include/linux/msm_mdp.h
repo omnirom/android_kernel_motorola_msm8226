@@ -1,7 +1,7 @@
 /* include/linux/msm_mdp.h
  *
  * Copyright (C) 2007 Google Incorporated
- * Copyright (c) 2012-2013 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2014 The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -79,6 +79,8 @@
 #define MSMFB_WRITEBACK_SET_MIRRORING_HINT _IOW(MSMFB_IOCTL_MAGIC, 167, \
 						unsigned int)
 #define MSMFB_ASYNC_BLIT              _IOW(MSMFB_IOCTL_MAGIC, 168, unsigned int)
+#define MSMFB_OVERLAY_PREPARE		_IOWR(MSMFB_IOCTL_MAGIC, 169, \
+						struct mdp_overlay_list)
 #define MSMFB_REG_READ   _IOWR(MSMFB_IOCTL_MAGIC, 64, struct msmfb_reg_access)
 #define MSMFB_REG_WRITE  _IOW(MSMFB_IOCTL_MAGIC, 65, struct msmfb_reg_access)
 
@@ -926,6 +928,7 @@ struct msmfb_metadata {
 
 #define MDP_MAX_FENCE_FD	32
 #define MDP_BUF_SYNC_FLAG_WAIT	1
+#define MDP_BUF_SYNC_FLAG_RETIRE_FENCE	0x10
 
 struct mdp_buf_sync {
 	uint32_t flags;
@@ -933,6 +936,7 @@ struct mdp_buf_sync {
 	uint32_t session_id;
 	int *acq_fen_fd;
 	int *rel_fen_fd;
+	int *retire_fen_fd;
 };
 
 struct mdp_async_blit_req_list {
@@ -942,20 +946,30 @@ struct mdp_async_blit_req_list {
 };
 
 #define MDP_DISPLAY_COMMIT_OVERLAY	1
-struct mdp_buf_fence {
-	uint32_t flags;
-	uint32_t acq_fen_fd_cnt;
-	int acq_fen_fd[MDP_MAX_FENCE_FD];
-	int rel_fen_fd[MDP_MAX_FENCE_FD];
-};
-
 
 struct mdp_display_commit {
 	uint32_t flags;
 	uint32_t wait_for_finish;
 	struct fb_var_screeninfo var;
-	struct mdp_buf_fence buf_fence;
 	struct mdp_rect roi;
+};
+
+/**
+* struct mdp_overlay_list - argument for ioctl MSMFB_OVERLAY_PREPARE
+* @num_overlays:	Number of overlay layers as part of the frame.
+* @overlay_list:	Pointer to a list of overlay structures identifying
+*			the layers as part of the frame
+* @flags:		Flags can be used to extend behavior.
+* @processed_overlays:	Output parameter indicating how many pipes were
+*			successful. If there are no errors this number should
+*			match num_overlays. Otherwise it will indicate the last
+*			successful index for overlay that couldn't be set.
+*/
+struct mdp_overlay_list {
+	uint32_t num_overlays;
+	struct mdp_overlay **overlay_list;
+	uint32_t flags;
+	uint32_t processed_overlays;
 };
 
 struct mdp_page_protection {
@@ -1018,6 +1032,7 @@ int msm_fb_writeback_dequeue_buffer(struct fb_info *info,
 int msm_fb_writeback_stop(struct fb_info *info);
 int msm_fb_writeback_terminate(struct fb_info *info);
 int msm_fb_writeback_set_secure(struct fb_info *info, int enable);
+int msm_fb_writeback_iommu_ref(struct fb_info *info, int enable);
 #endif
 
 #endif /*_MSM_MDP_H_*/

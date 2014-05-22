@@ -869,7 +869,9 @@ static inline void idle_balance(int cpu, struct rq *rq)
 
 #endif
 
+#ifdef CONFIG_SYSRQ_SCHED_DEBUG
 extern void sysrq_sched_debug_show(void);
+#endif
 extern void sched_init_granularity(void);
 extern void update_max_interval(void);
 extern void update_group_power(struct sched_domain *sd, int cpu);
@@ -883,7 +885,7 @@ extern void resched_cpu(int cpu);
 extern struct rt_bandwidth def_rt_bandwidth;
 extern void init_rt_bandwidth(struct rt_bandwidth *rt_b, u64 period, u64 runtime);
 
-extern void update_cpu_load(struct rq *this_rq);
+extern void update_idle_cpu_load(struct rq *this_rq);
 
 #ifdef CONFIG_CGROUP_CPUACCT
 #include <linux/cgroup.h>

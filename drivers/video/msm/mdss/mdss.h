@@ -66,6 +66,19 @@ struct mdss_debug_inf {
 	void (*debug_enable_clock)(int on);
 };
 
+#define MDSS_IRQ_SUSPEND	-1
+#define MDSS_IRQ_RESUME		1
+#define MDSS_IRQ_REQ		0
+
+struct mdss_intr {
+	/* requested intr */
+	u32 req;
+	/* currently enabled intr */
+	u32 curr;
+	int state;
+	spinlock_t lock;
+};
+
 struct mdss_data_type {
 	u32 mdp_rev;
 	struct clk *mdp_clk[MDSS_MAX_CLK];
@@ -91,6 +104,7 @@ struct mdss_data_type {
 	u8 has_wfd_blk;
 	u8 has_wb_ad;
 
+	u32 rotator_ot_limit;
 	u32 mdp_irq_mask;
 	u32 mdp_hist_irq_mask;
 
@@ -103,6 +117,7 @@ struct mdss_data_type {
 	u32 res_init;
 	u32 bus_hdl;
 
+	u32 highest_bank_bit;
 	u32 smp_mb_cnt;
 	u32 smp_mb_size;
 	u32 smp_mb_per_pipe;
@@ -139,6 +154,8 @@ struct mdss_data_type {
 	u32 nad_cfgs;
 	struct workqueue_struct *ad_calc_wq;
 
+	struct mdss_intr hist_intr;
+
 	struct ion_client *iclient;
 	int iommu_attached;
 	struct mdss_iommu_map_type *iommu_map;
@@ -148,6 +165,8 @@ struct mdss_data_type {
 	int current_bus_idx;
 	bool mixer_switched;
 	struct mdss_panel_cfg pan_cfg;
+
+	int handoff_pending;
 };
 extern struct mdss_data_type *mdss_res;
 

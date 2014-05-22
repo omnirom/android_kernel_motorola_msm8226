@@ -183,16 +183,20 @@ static int mdss_mdp_ctl_perf_commit(struct mdss_data_type *mdata, u32 flags)
  * (MDP clock requirement) based on frame size and scaling requirements.
  */
 int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
-		struct mdss_mdp_perf_params *perf, int tune)
+	struct mdss_mdp_perf_params *perf, int tune, struct mdss_mdp_img_rect *roi)
 {
 	struct mdss_mdp_mixer *mixer;
 	int fps = DEFAULT_FRAME_RATE;
 	u32 quota, rate, v_total, src_h;
+	struct mdss_mdp_img_rect src, dst;
 
 	if (!pipe || !perf || !pipe->mixer)
 		return -EINVAL;
 
 	mixer = pipe->mixer;
+	dst = pipe->dst;
+	src = pipe->src;
+
 	if (mixer->rotator_mode) {
 		v_total = pipe->flags & MDP_ROT_90 ? pipe->dst.w : pipe->dst.h;
 	} else if (mixer->type == MDSS_MDP_MIXER_TYPE_INTF) {
@@ -206,14 +210,17 @@ int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
 		v_total = mixer->height;
 	}
 
+	if (roi)
+		mdss_mdp_crop_rect(&src, &dst, roi);
+
 	/*
 	 * when doing vertical decimation lines will be skipped, hence there is
 	 * no need to account for these lines in MDP clock or request bus
 	 * bandwidth to fetch them.
 	 */
-	src_h = pipe->src.h >> pipe->vert_deci;
+	src_h = src.h >> pipe->vert_deci;
 
-	quota = fps * pipe->src.w * src_h;
+	quota = fps * src.w * src_h;
 	if (pipe->src_fmt->chroma_sample == MDSS_MDP_CHROMA_420)
 		/*
 		 * with decimation, chroma is not downsampled, this means we
@@ -226,9 +233,9 @@ int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
 	else
 		quota *= pipe->src_fmt->bpp;
 
-	rate = pipe->dst.w;
-	if (src_h > pipe->dst.h)
-		rate = (rate * src_h) / pipe->dst.h;
+	rate = dst.w;
+	if (src_h > dst.h)
+		rate = (rate * src_h) / dst.h;
 
 	rate *= v_total * fps;
 	if (mixer->rotator_mode) {
@@ -236,8 +243,9 @@ int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
 		quota *= 2; /* bus read + write */
 		perf->ib_quota = quota;
 	} else {
-		perf->ib_quota = (quota / pipe->dst.h) * v_total;
+		perf->ib_quota = (quota / dst.h) * v_total;
 	}
+
 	perf->ab_quota = quota;
 	perf->mdp_clk_rate = rate;
 
@@ -291,7 +299,7 @@ static void mdss_mdp_perf_mixer_update(struct mdss_mdp_mixer *mixer,
 		if (pipe == NULL)
 			continue;
 
-		if (mdss_mdp_perf_calc_pipe(pipe, &perf, 0))
+		if (mdss_mdp_perf_calc_pipe(pipe, &perf, 0, &mixer->roi))
 			continue;
 
 		ab_total += perf.ab_quota >> MDSS_MDP_BUS_FACTOR_SHIFT;
@@ -1106,6 +1114,7 @@ static int mdss_mdp_ctl_start_sub(struct mdss_mdp_ctl *ctl)
 int mdss_mdp_ctl_start(struct mdss_mdp_ctl *ctl)
 {
 	struct mdss_mdp_ctl *sctl;
+	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 	int ret = 0;
 
 	if (ctl->power_on) {
@@ -1153,6 +1162,7 @@ int mdss_mdp_ctl_start(struct mdss_mdp_ctl *ctl)
 			mdss_mdp_ctl_write(ctl, MDSS_MDP_REG_CTL_PACK_3D, 0);
 		}
 	}
+	mdss_mdp_hist_intr_setup(&mdata->hist_intr, MDSS_IRQ_RESUME);
 
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
 error:
@@ -1165,6 +1175,7 @@ int mdss_mdp_ctl_stop(struct mdss_mdp_ctl *ctl)
 {
 	struct mdss_mdp_ctl *sctl;
 	int ret = 0;
+	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
 	u32 off;
 
 	if (!ctl->power_on) {
@@ -1179,6 +1190,8 @@ int mdss_mdp_ctl_stop(struct mdss_mdp_ctl *ctl)
 	mutex_lock(&ctl->lock);
 
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
+
+	mdss_mdp_hist_intr_setup(&mdata->hist_intr, MDSS_IRQ_SUSPEND);
 
 	if (ctl->stop_fnc)
 		ret = ctl->stop_fnc(ctl);
@@ -1706,9 +1719,12 @@ static int mdss_mdp_mixer_update(struct mdss_mdp_mixer *mixer)
 int mdss_mdp_ctl_update_fps(struct mdss_mdp_ctl *ctl, int fps)
 {
 	int ret = 0;
+	struct mdss_mdp_ctl *sctl = NULL;
+
+	sctl = mdss_mdp_get_split_ctl(ctl);
 
 	if (ctl->config_fps_fnc)
-		ret = ctl->config_fps_fnc(ctl, fps);
+		ret = ctl->config_fps_fnc(ctl, sctl, fps);
 
 	return ret;
 }
