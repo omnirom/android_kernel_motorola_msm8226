@@ -878,10 +878,9 @@ int diag_device_write(void *buf, int data_type, struct diag_request *write_ptr)
 					driver->buf_tbl[i].length =
 								 driver->used;
 #ifdef DIAG_DEBUG
-					pr_debug("diag: ENQUEUE buf ptr"
-						   " and length is %x , %d\n",
-						   (unsigned int)(driver->buf_
-				tbl[i].buf), driver->buf_tbl[i].length);
+					pr_debug("diag: ENQUEUE buf ptr and length is %p , %d\n",
+						 driver->buf_tbl[i].buf,
+						 driver->buf_tbl[i].length);
 #endif
 					break;
 				}
@@ -913,9 +912,9 @@ int diag_device_write(void *buf, int data_type, struct diag_request *write_ptr)
 			if (foundIndex == -1)
 				err = -1;
 			else
-				pr_debug("diag: ENQUEUE HSIC buf ptr and length is %x , %d, ch %d\n",
-					(unsigned int)buf,
-					 diag_bridge[index].write_len, index);
+				pr_debug("diag: ENQUEUE HSIC buf ptr and length is %p , %d, ch %d\n",
+					 buf, diag_bridge[index].write_len,
+					 index);
 		}
 #endif
 		for (i = 0; i < driver->num_clients; i++)
@@ -1938,7 +1937,6 @@ int diagfwd_disconnect(void)
 	printk(KERN_DEBUG "diag: USB disconnected\n");
 	driver->usb_connected = 0;
 	driver->debug_flag = 1;
-	usb_diag_free_req(driver->legacy_ch);
 	if (driver->usb_req_allocated) {
 		for (i = 0; i < NUM_SMD_DATA_CHANNELS; i++) {
 			driver->smd_data[i].in_busy_1 = 1;
@@ -2617,6 +2615,12 @@ void diagfwd_init(void)
 	    && (driver->hdlc_buf = kzalloc(HDLC_MAX, GFP_KERNEL)) == NULL)
 		goto err;
 	kmemleak_not_leak(driver->hdlc_buf);
+	if (driver->user_space_data_buf == NULL)
+		driver->user_space_data_buf = kzalloc(USER_SPACE_DATA,
+							GFP_KERNEL);
+	if (driver->user_space_data_buf == NULL)
+		goto err;
+	kmemleak_not_leak(driver->user_space_data_buf);
 	if (driver->client_map == NULL &&
 	    (driver->client_map = kzalloc
 	     ((driver->num_clients) * sizeof(struct diag_client_map),
@@ -2704,6 +2708,7 @@ err:
 	kfree(driver->pkt_buf);
 	kfree(driver->usb_read_ptr);
 	kfree(driver->apps_rsp_buf);
+	kfree(driver->user_space_data_buf);
 	if (driver->diag_wq)
 		destroy_workqueue(driver->diag_wq);
 }
@@ -2718,7 +2723,6 @@ void diagfwd_exit(void)
 #ifdef CONFIG_DIAG_OVER_USB
 	if (driver->usb_connected && driver->usb_req_allocated) {
 		driver->usb_req_allocated = 0;
-		usb_diag_free_req(driver->legacy_ch);
 	}
 	channel_diag_close(driver->legacy_ch);
 #endif
@@ -2745,5 +2749,6 @@ void diagfwd_exit(void)
 	kfree(driver->pkt_buf);
 	kfree(driver->usb_read_ptr);
 	kfree(driver->apps_rsp_buf);
+	kfree(driver->user_space_data_buf);
 	destroy_workqueue(driver->diag_wq);
 }

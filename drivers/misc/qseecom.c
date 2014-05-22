@@ -1,6 +1,6 @@
 /*Qualcomm Secure Execution Environment Communicator (QSEECOM) driver
  *
- * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -2649,7 +2649,7 @@ static int __qseecom_generate_and_save_key(struct qseecom_dev_handle *data,
 	if (ret) {
 		pr_err("scm call to generate key failed : %d\n", ret);
 		__qseecom_disable_clk(CLK_QSEE);
-		return ret;
+		return -EFAULT;
 	}
 
 	switch (resp.result) {
@@ -2700,7 +2700,7 @@ static int __qseecom_delete_saved_key(struct qseecom_dev_handle *data,
 	if (ret) {
 		pr_err("scm call to delete key failed : %d\n", ret);
 		__qseecom_disable_clk(CLK_QSEE);
-		return ret;
+		return -EFAULT;
 	}
 
 	switch (resp.result) {
@@ -2708,9 +2708,18 @@ static int __qseecom_delete_saved_key(struct qseecom_dev_handle *data,
 		break;
 	case QSEOS_RESULT_INCOMPLETE:
 		ret = __qseecom_process_incomplete_cmd(data, &resp);
-		if (ret)
+		if (ret) {
 			pr_err("process_incomplete_cmd FAILED, resp.result %d\n",
 					resp.result);
+			if (resp.result == QSEOS_RESULT_FAIL_MAX_ATTEMPT) {
+				pr_debug("Max attempts to input password reached.\n");
+				ret = -ERANGE;
+			}
+		}
+		break;
+	case QSEOS_RESULT_FAIL_MAX_ATTEMPT:
+		pr_debug("Max attempts to input password reached.\n");
+		ret = -ERANGE;
 		break;
 	case QSEOS_RESULT_FAILURE:
 	default:
@@ -2748,7 +2757,7 @@ static int __qseecom_set_clear_ce_key(struct qseecom_dev_handle *data,
 		__qseecom_disable_clk(CLK_QSEE);
 		if (qseecom.qsee.instance != qseecom.ce_drv.instance)
 			__qseecom_disable_clk(CLK_CE_DRV);
-		return ret;
+		return -EFAULT;
 	}
 
 	switch (resp.result) {
@@ -2756,9 +2765,18 @@ static int __qseecom_set_clear_ce_key(struct qseecom_dev_handle *data,
 		break;
 	case QSEOS_RESULT_INCOMPLETE:
 		ret = __qseecom_process_incomplete_cmd(data, &resp);
-		if (ret)
+		if (ret) {
 			pr_err("process_incomplete_cmd FAILED, resp.result %d\n",
 					resp.result);
+			if (resp.result == QSEOS_RESULT_FAIL_MAX_ATTEMPT) {
+				pr_debug("Max attempts to input password reached.\n");
+				ret = -ERANGE;
+			}
+		}
+		break;
+	case QSEOS_RESULT_FAIL_MAX_ATTEMPT:
+		pr_debug("Max attempts to input password reached.\n");
+		ret = -ERANGE;
 		break;
 	case QSEOS_RESULT_FAILURE:
 	default:
@@ -2798,7 +2816,7 @@ static int __qseecom_update_current_key_user_info(
 		__qseecom_disable_clk(CLK_QSEE);
 		if (qseecom.qsee.instance != qseecom.ce_drv.instance)
 			__qseecom_disable_clk(CLK_CE_DRV);
-		return ret;
+		return -EFAULT;
 	}
 
 	switch (resp.result) {
@@ -2864,7 +2882,7 @@ static int qseecom_create_key(struct qseecom_dev_handle *data,
 					&generate_key_ireq);
 	if (ret) {
 		pr_err("Failed to generate key on storage: %d\n", ret);
-		return -EFAULT;
+		return ret;
 	}
 
 	set_key_ireq.qsee_command_id = QSEOS_SET_KEY;
@@ -2887,7 +2905,7 @@ static int qseecom_create_key(struct qseecom_dev_handle *data,
 	if (ret) {
 		pr_err("Failed to create key: pipe %d, ce %d: %d\n",
 			pipe, ce_hw, ret);
-		return -EFAULT;
+		return ret;
 	}
 
 	return ret;
@@ -2994,7 +3012,7 @@ static int qseecom_update_key_user_info(struct qseecom_dev_handle *data,
 						&ireq);
 	if (ret) {
 		pr_err("Failed to update key info: %d\n", ret);
-		return -EFAULT;
+		return ret;
 	}
 	return ret;
 
@@ -3998,6 +4016,83 @@ exit_irqrestore:
 	return ret;
 }
 
+static int qseecom_suspend(struct platform_device *pdev, pm_message_t state)
+{
+	int ret = 0;
+	struct qseecom_clk *qclk;
+	qclk = &qseecom.qsee;
+
+	if (qseecom.cumulative_mode != INACTIVE) {
+		ret = __qseecom_set_msm_bus_request(INACTIVE);
+		if (ret)
+			pr_err("Fail to scale down bus\n");
+	}
+	mutex_lock(&clk_access_lock);
+	if (qclk->clk_access_cnt) {
+		if (qclk->ce_clk != NULL)
+			clk_disable_unprepare(qclk->ce_clk);
+		if (qclk->ce_core_clk != NULL)
+			clk_disable_unprepare(qclk->ce_core_clk);
+		if (qclk->ce_bus_clk != NULL)
+			clk_disable_unprepare(qclk->ce_bus_clk);
+	}
+	mutex_unlock(&clk_access_lock);
+	return 0;
+}
+
+static int qseecom_resume(struct platform_device *pdev)
+{
+	int mode = 0;
+	int ret = 0;
+	struct qseecom_clk *qclk;
+	qclk = &qseecom.qsee;
+
+	if (qseecom.cumulative_mode >= HIGH)
+		mode = HIGH;
+	else
+		mode = qseecom.cumulative_mode;
+
+	if (qseecom.cumulative_mode != INACTIVE) {
+		ret = __qseecom_set_msm_bus_request(mode);
+		if (ret)
+			pr_err("Fail to scale down bus\n");
+	}
+
+	mutex_lock(&clk_access_lock);
+	if (qclk->clk_access_cnt) {
+
+		ret = clk_prepare_enable(qclk->ce_core_clk);
+		if (ret) {
+			pr_err("Unable to enable/prepare CE core clk\n");
+			qclk->clk_access_cnt = 0;
+			goto err;
+		}
+
+		ret = clk_prepare_enable(qclk->ce_clk);
+		if (ret) {
+			pr_err("Unable to enable/prepare CE iface clk\n");
+			qclk->clk_access_cnt = 0;
+			goto ce_clk_err;
+		}
+
+		ret = clk_prepare_enable(qclk->ce_bus_clk);
+		if (ret) {
+			pr_err("Unable to enable/prepare CE bus clk\n");
+			qclk->clk_access_cnt = 0;
+			goto ce_bus_clk_err;
+		}
+	}
+	mutex_unlock(&clk_access_lock);
+	return 0;
+
+ce_bus_clk_err:
+	clk_disable_unprepare(qclk->ce_clk);
+ce_clk_err:
+	clk_disable_unprepare(qclk->ce_core_clk);
+err:
+	mutex_unlock(&clk_access_lock);
+	return -EIO;
+}
 static struct of_device_id qseecom_match[] = {
 	{
 		.compatible = "qcom,qseecom",
@@ -4008,6 +4103,8 @@ static struct of_device_id qseecom_match[] = {
 static struct platform_driver qseecom_plat_driver = {
 	.probe = qseecom_probe,
 	.remove = qseecom_remove,
+	.suspend = qseecom_suspend,
+	.resume = qseecom_resume,
 	.driver = {
 		.name = "qseecom",
 		.owner = THIS_MODULE,

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -79,29 +79,10 @@ void mdss_dsi_panel_unlock_mutex(struct mdss_panel_data *pdata)
 
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
-	int ret;
-
-	if (!gpio_is_valid(ctrl->pwm_pmic_gpio)) {
-		pr_err("%s: pwm_pmic_gpio=%d Invalid\n", __func__,
-				ctrl->pwm_pmic_gpio);
-		ctrl->pwm_pmic_gpio = -1;
-		return;
-	}
-
-	ret = gpio_request(ctrl->pwm_pmic_gpio, "disp_pwm");
-	if (ret) {
-		pr_err("%s: pwm_pmic_gpio=%d request failed\n", __func__,
-				ctrl->pwm_pmic_gpio);
-		ctrl->pwm_pmic_gpio = -1;
-		return;
-	}
-
 	ctrl->pwm_bl = pwm_request(ctrl->pwm_lpg_chan, "lcd-bklt");
 	if (ctrl->pwm_bl == NULL || IS_ERR(ctrl->pwm_bl)) {
-		pr_err("%s: lpg_chan=%d pwm request failed", __func__,
-				ctrl->pwm_lpg_chan);
-		gpio_free(ctrl->pwm_pmic_gpio);
-		ctrl->pwm_pmic_gpio = -1;
+		pr_err("%s: Error: lpg_chan=%d pwm request failed",
+				__func__, ctrl->pwm_lpg_chan);
 	}
 }
 
@@ -1522,11 +1503,11 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	pinfo->mipi.insert_dcs_cmd =
 			(!rc ? tmp : 1);
 	rc = of_property_read_u32(np,
-		"qcom,mdss-dsi-te-v-sync-continue-lines", &tmp);
+		"qcom,mdss-dsi-wr-mem-continue", &tmp);
 	pinfo->mipi.wr_mem_continue =
 			(!rc ? tmp : 0x3c);
 	rc = of_property_read_u32(np,
-		"qcom,mdss-dsi-te-v-sync-rd-ptr-irq-line", &tmp);
+		"qcom,mdss-dsi-wr-mem-start", &tmp);
 	pinfo->mipi.wr_mem_start =
 			(!rc ? tmp : 0x2c);
 	rc = of_property_read_u32(np,
@@ -1536,7 +1517,7 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	rc = of_property_read_u32(np, "qcom,mdss-dsi-virtual-channel-id", &tmp);
 	pinfo->mipi.vc = (!rc ? tmp : 0);
 	pinfo->mipi.rgb_swap = DSI_RGB_SWAP_RGB;
-	data = of_get_property(np, "mdss-dsi-color-order", NULL);
+	data = of_get_property(np, "qcom,mdss-dsi-color-order", NULL);
 	if (data) {
 		if (!strcmp(data, "rgb_swap_rbg"))
 			pinfo->mipi.rgb_swap = DSI_RGB_SWAP_RBG;

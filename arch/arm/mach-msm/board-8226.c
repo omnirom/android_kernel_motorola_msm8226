@@ -15,6 +15,7 @@
 #include <linux/errno.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
+#include <linux/i2c/i2c-qup.h>
 #include <linux/gpio.h>
 #include <linux/irq.h>
 #include <linux/irqdomain.h>
@@ -24,6 +25,9 @@
 #include <linux/of_fdt.h>
 #include <linux/of_irq.h>
 #include <linux/memory.h>
+#include <linux/regulator/cpr-regulator.h>
+#include <linux/regulator/fan53555.h>
+#include <linux/regulator/onsemi-ncp6335d.h>
 #include <linux/regulator/qpnp-regulator.h>
 #include <linux/msm_tsens.h>
 #include <asm/mach/map.h>
@@ -31,6 +35,7 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/time.h>
 #include <mach/board.h>
+#include <mach/msm_bus.h>
 #include <mach/gpiomux.h>
 #include <mach/msm_iomap.h>
 #include <mach/restart.h>
@@ -52,6 +57,14 @@
 #include "spm.h"
 #include "pm.h"
 #include "modem_notifier.h"
+#include "spm-regulator.h"
+#ifdef CONFIG_LCD_KCAL
+#include <mach/kcal.h>
+#include <linux/module.h>
+#include "../../../drivers/video/msm/mdss/mdss_fb.h"
+extern int update_preset_lcdc_lut(void);
+#endif
+
 
 static struct memtype_reserve msm8226_reserve_table[] __initdata = {
 	[MEMTYPE_SMI] = {
@@ -105,6 +118,52 @@ static void __init msm8226_reserve(void)
 	msm_reserve();
 }
 
+#ifdef CONFIG_LCD_KCAL
+extern int g_kcal_r;
+extern int g_kcal_g;
+extern int g_kcal_b;
+
+int kcal_set_values(int kcal_r, int kcal_g, int kcal_b)
+{
+	g_kcal_r = kcal_r;
+	g_kcal_g = kcal_g;
+	g_kcal_b = kcal_b;
+	return 0;
+}
+
+static int kcal_get_values(int *kcal_r, int *kcal_g, int *kcal_b)
+{
+	*kcal_r = g_kcal_r;
+	*kcal_g = g_kcal_g;
+	*kcal_b = g_kcal_b;
+	return 0;
+}
+
+static int kcal_refresh_values(void)
+{
+	return update_preset_lcdc_lut();
+}
+
+static struct kcal_platform_data kcal_pdata = {
+	.set_values = kcal_set_values,
+	.get_values = kcal_get_values,
+	.refresh_display = kcal_refresh_values
+};
+
+static struct platform_device kcal_platrom_device = {
+	.name = "kcal_ctrl",
+	.dev = {
+		.platform_data = &kcal_pdata,
+	}
+};
+
+void __init add_lcd_kcal_devices(void)
+{
+	pr_info (" LCD_KCAL_DEBUG : %s \n", __func__);
+	platform_device_register(&kcal_platrom_device);
+};
+#endif
+
 /*
  * Used to satisfy dependencies for devices that need to be
  * run early or in a particular order. Most likely your device doesn't fall
@@ -121,12 +180,21 @@ void __init msm8226_add_drivers(void)
 	msm_pm_sleep_status_init();
 	rpm_regulator_smd_driver_init();
 	qpnp_regulator_init();
+	spm_regulator_init();
 	if (of_board_is_rumi())
 		msm_clock_init(&msm8226_rumi_clock_init_data);
 	else
 		msm_clock_init(&msm8226_clock_init_data);
+	msm_bus_fabric_init_driver();
+	qup_i2c_init_driver();
+	ncp6335d_regulator_init();
+	fan53555_regulator_init();
+	cpr_regulator_init();
 	tsens_tm_init_driver();
 	msm_thermal_device_init();
+#ifdef CONFIG_LCD_KCAL
+	add_lcd_kcal_devices();
+#endif
 }
 
 void __init msm8226_init(void)

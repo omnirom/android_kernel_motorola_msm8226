@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -40,6 +40,12 @@ static char *descriptions =
 	"15 Perf: bring CPU online if needed when disabling irq\n"
 	"16 Perf: Support sw events across hotplug\n"
 	"17 msm: perf: initialise krait perf L2 counter enables\n"
+	"18 msm: perf: clean up duplicate constraint events\n"
+	"19 Perf: Make per-process counters cumulative\n"
+	"20 Perf: Fix PID for tracepoints\n"
+	"21 Perf: preserve registers across hotplug\n"
+	"22 msm: perf: fix formatting of trace entry\n"
+	"23 msm: perf: Fix cpu id logic in tracectr notifier\n"
 ;
 
 static ssize_t desc_read(struct file *fp, char __user *buf,

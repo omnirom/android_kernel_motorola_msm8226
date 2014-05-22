@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1123,7 +1123,7 @@ static const struct snd_kcontrol_new tapan_common_snd_controls[] = {
 	SOC_SINGLE_TLV("LINEOUT2 Volume", TAPAN_A_RX_LINE_2_GAIN, 0, 14, 1,
 		line_gain),
 
-	SOC_SINGLE_TLV("SPK DRV Volume", TAPAN_A_SPKR_DRV_GAIN, 3, 7, 1,
+	SOC_SINGLE_TLV("SPK DRV Volume", TAPAN_A_SPKR_DRV_GAIN, 3, 8, 1,
 		line_gain),
 
 	SOC_SINGLE_TLV("ADC1 Volume", TAPAN_A_TX_1_EN, 2, 19, 0, analog_gain),
@@ -1891,9 +1891,10 @@ static int tapan_codec_enable_adc(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
-		if (w->reg == TAPAN_A_TX_3_EN)
+		if (w->reg == TAPAN_A_TX_3_EN ||
+		    w->reg == TAPAN_A_TX_1_EN)
 			wcd9xxx_resmgr_notifier_call(&tapan->resmgr,
-						     WCD9XXX_EVENT_PRE_TX_3_ON);
+						WCD9XXX_EVENT_PRE_TX_1_3_ON);
 		snd_soc_update_bits(codec, adc_reg, 1 << init_bit_shift,
 				1 << init_bit_shift);
 		break;
@@ -1903,9 +1904,10 @@ static int tapan_codec_enable_adc(struct snd_soc_dapm_widget *w,
 
 		break;
 	case SND_SOC_DAPM_POST_PMD:
-		if (w->reg == TAPAN_A_TX_3_EN)
+		if (w->reg == TAPAN_A_TX_3_EN ||
+		    w->reg == TAPAN_A_TX_1_EN)
 			wcd9xxx_resmgr_notifier_call(&tapan->resmgr,
-						     WCD9XXX_EVENT_POST_TX_3_OFF);
+						WCD9XXX_EVENT_POST_TX_1_3_OFF);
 		break;
 	}
 	return 0;
@@ -2286,16 +2288,23 @@ static int tapan_codec_enable_micbias(struct snd_soc_dapm_widget *w,
 
 #ifndef CONFIG_SND_SOC_TPA6165A2
 /* called under codec_resource_lock acquisition */
-static int tapan_enable_mbhc_micbias(struct snd_soc_codec *codec, bool enable)
+static int tapan_enable_mbhc_micbias(struct snd_soc_codec *codec, bool enable,
+				     enum wcd9xxx_micbias_num micb_num)
 {
 	int rc;
+	const char *micbias;
+
+	if (micb_num == MBHC_MICBIAS2)
+		micbias = DAPM_MICBIAS2_EXTERNAL_STANDALONE;
+	else
+		return -EINVAL;
 
 	if (enable)
 		rc = snd_soc_dapm_force_enable_pin(&codec->dapm,
-					     DAPM_MICBIAS2_EXTERNAL_STANDALONE);
+						   micbias);
 	else
 		rc = snd_soc_dapm_disable_pin(&codec->dapm,
-					     DAPM_MICBIAS2_EXTERNAL_STANDALONE);
+					      micbias);
 	if (!rc)
 		snd_soc_dapm_sync(&codec->dapm);
 	pr_debug("%s: leave ret %d\n", __func__, rc);
@@ -5519,7 +5528,8 @@ static int tapan_setup_zdet(struct wcd9xxx_mbhc *mbhc,
 				mux_wait_us + WCD9XXX_USLEEP_RANGE_MARGIN_US);
 		break;
 	case PA_DISABLE:
-		wcd9xxx_enable_static_pa(mbhc, false);
+		if (!mbhc->hph_pa_dac_state)
+			wcd9xxx_enable_static_pa(mbhc, false);
 		wcd9xxx_restore_registers(codec, &tapan->reg_save_restore);
 		break;
 	}

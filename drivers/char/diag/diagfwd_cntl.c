@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -350,12 +350,17 @@ void diag_send_diag_flush(struct diag_smd_info *smd_info)
 {
 	struct diag_ctrl_msg_diag_flush diag_flush;
 
-	/* For now only allow the modem to receive the message */
-	if (!smd_info || smd_info->peripheral != MODEM_DATA ||
-		smd_info->type != SMD_CNTL_TYPE) {
-		pr_err("diag: returning early smd_info->peripheral: %d,"
-			" smd_info->type: %d\n",
-			smd_info->peripheral, smd_info->type);
+	if (!smd_info || smd_info->type != SMD_CNTL_TYPE) {
+		pr_err("diag: In %s, invalid channel info, smd_info: %p type: %d\n",
+					__func__, smd_info,
+					((smd_info) ? smd_info->type : -1));
+		return;
+	}
+
+	if (smd_info->peripheral < MODEM_DATA ||
+					smd_info->peripheral > WCNSS_DATA) {
+		pr_err("diag: In %s, invalid peripheral %d\n", __func__,
+							smd_info->peripheral);
 		return;
 	}
 
@@ -379,7 +384,9 @@ static void diag_send_ctrl_msg(struct diag_smd_info *smd_info,
 
 	if (smd_info->ch) {
 		while (retry_count < 3) {
+			mutex_lock(&smd_info->smd_ch_mutex);
 			wr_size = smd_write(smd_info->ch, msg, len);
+			mutex_unlock(&smd_info->smd_ch_mutex);
 			if (wr_size == -ENOMEM) {
 				retry_count++;
 				for (timer = 0; timer < 5; timer++)
@@ -417,7 +424,9 @@ int diag_send_stm_state(struct diag_smd_info *smd_info,
 		stm_msg.version = 1;
 		stm_msg.control_data = stm_control_data;
 		while (retry_count < 3) {
+			mutex_lock(&smd_info->smd_ch_mutex);
 			wr_size = smd_write(smd_info->ch, &stm_msg, msg_size);
+			mutex_unlock(&smd_info->smd_ch_mutex);
 			if (wr_size == -ENOMEM) {
 				/*
 				 * The smd channel is full. Delay while
